@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aion-revenue-factory"
+version = "0.1.0"
+description = "An autonomous AI business-development system that finds, qualifies, nurtures, and closes revenue opportunities 24/7."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "AION" }]
+keywords = ["ai", "sales", "revenue", "automation", "agents", "crm"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+aion-revenue-factory = "aion_revenue_factory.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
