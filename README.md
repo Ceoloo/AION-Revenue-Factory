@@ -164,16 +164,61 @@ examples/              # runnable examples
 docs/ARCHITECTURE.md   # deeper design notes + production wiring
 ```
 
-## Wiring in production services
+## Going live (real APIs)
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how to replace each
-reference implementation with Airtable/Supabase, your AI gateway, real prospect
-APIs, and a live response signal — without touching the departments or the
-orchestrator.
+Live adapters ship in `integrations/live/` and satisfy the same interfaces as
+the reference implementations, so nothing in the departments or orchestrator
+changes. Only the Claude gateway needs a third-party SDK; Airtable, Supabase,
+prospect discovery, and outreach use the standard library.
+
+```bash
+pip install 'aion-revenue-factory[live]'   # adds the anthropic SDK
+```
+
+| Adapter               | Service                     | Configure with                                             |
+| --------------------- | --------------------------- | ---------------------------------------------------------- |
+| `AnthropicGateway`    | Claude (real offer/outreach copy) | `ANTHROPIC_API_KEY` (+ optional `AION_LLM_MODEL`)    |
+| `AirtableCRM`         | Airtable REST API           | `AIRTABLE_API_KEY` + `AIRTABLE_BASE_ID`                    |
+| `SupabaseCRM`         | Supabase (PostgREST)        | `SUPABASE_URL` + `SUPABASE_KEY`                            |
+| `HttpProspectSource`  | Any JSON enrichment/search API | `AION_PROSPECT_URL` (+ `AION_PROSPECT_API_KEY`)         |
+| `SmtpSender`          | Email over SMTP             | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` |
+| `WebhookSender`       | ESP / dialer / voice-AI webhook | `AION_OUTREACH_WEBHOOK_URL` (+ `AION_OUTREACH_WEBHOOK_KEY`) |
+
+`build_factory_from_env()` inspects the environment and injects a live adapter
+wherever credentials are present, falling back to the offline reference
+everywhere else — so you can go live one service at a time:
+
+```bash
+# See which integrations are live vs offline
+python -m aion_revenue_factory --describe-wiring
+
+# Run the loop using whatever live services are configured
+export ANTHROPIC_API_KEY=sk-...
+export AIRTABLE_API_KEY=pat...   AIRTABLE_BASE_ID=app...
+python -m aion_revenue_factory --live --days 1
+```
+
+Or in code:
+
+```python
+from aion_revenue_factory import build_factory_from_env, Dashboard
+
+factory = build_factory_from_env()   # live where configured, offline otherwise
+factory.run_day(prospects=50)
+print(Dashboard(factory.crm).metrics())
+```
+
+The live CRMs are **write-through**: every entity is persisted to Airtable /
+Supabase *and* kept in a local cache, so the dashboard's reads stay fast and a
+transient CRM outage never stops the revenue workflow. The Claude gateway uses
+the official `anthropic` SDK (imported lazily). See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full wiring reference.
 
 ## Status
 
-This is a foundation, not a finished product: the intelligence is intentionally
-rule-based and the data is simulated so the whole system runs offline,
-deterministically, and under test. It is designed to be extended service by
-service.
+The offline reference (rule-based intelligence, simulated prospects) runs
+deterministically and under test; the live adapters above connect it to real
+services. What remains bespoke per deployment: your prospect API's exact
+response shape (supply a `map_record` to `HttpProspectSource`), your CRM's table
+schema, and a live reply/booking/close signal to replace the simulated
+`ResponseModel`. It is designed to be taken live service by service.

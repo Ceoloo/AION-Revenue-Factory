@@ -75,21 +75,41 @@ class RevenueFactory:
 
     def __init__(
         self,
-        crm: InMemoryCRM | None = None,
+        crm=None,
         knowledge: KnowledgeBase | None = None,
         source_seed: int = 42,
         response_seed: int = 7,
+        gateway=None,
+        source=None,
+        outreach_send=None,
     ) -> None:
+        """Wire the departments together.
+
+        Every external dependency is injectable so the same orchestration runs
+        offline (the defaults) or against live services:
+
+        - ``gateway``: an AIGateway (default TemplateGateway; inject
+          AnthropicGateway for real LLM copy).
+        - ``crm``: a CRM (default InMemoryCRM; inject AirtableCRM / SupabaseCRM).
+        - ``source``: a ProspectSource (default SyntheticSource; inject
+          HttpProspectSource for real enrichment APIs).
+        - ``outreach_send``: a callable that actually sends a message (default
+          offline no-op; inject SmtpSender / WebhookSender).
+        """
         self.crm = crm or InMemoryCRM()
         self.knowledge = knowledge or KnowledgeBase()
-        gateway = TemplateGateway()
+        gateway = gateway or TemplateGateway()
         # Separate, seeded RNGs keep exploration deterministic and reproducible.
         offer_rng = random.Random(source_seed + 1)
         channel_rng = random.Random(source_seed + 2)
 
-        self.discovery = OpportunityDiscovery(SyntheticSource(seed=source_seed))
+        prospect_source = source or SyntheticSource(seed=source_seed)
+        self.discovery = OpportunityDiscovery(prospect_source)
         self.offers = OfferIntelligence(gateway, self.knowledge, rng=offer_rng)
-        self.outreach = OutreachWorkforce(gateway, self.knowledge, rng=channel_rng)
+        outreach_kwargs = {"rng": channel_rng}
+        if outreach_send is not None:
+            outreach_kwargs["send"] = outreach_send
+        self.outreach = OutreachWorkforce(gateway, self.knowledge, **outreach_kwargs)
         self.meeting_prep = MeetingPrep()
         self.proposals = ProposalGenerator(gateway)
         self.coach = DealCoach(self.knowledge)
