@@ -14,6 +14,7 @@ Quick start::
     print(Dashboard(factory.crm).metrics())
 """
 
+from .config import build_factory_from_env, describe_wiring
 from .dashboard import Dashboard
 from .orchestrator import DayResult, ResponseModel, RevenueFactory
 
@@ -24,5 +25,7 @@ __all__ = [
     "DayResult",
     "ResponseModel",
     "Dashboard",
+    "build_factory_from_env",
+    "describe_wiring",
     "__version__",
 ]

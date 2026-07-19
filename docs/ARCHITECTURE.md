@@ -58,30 +58,56 @@ is epsilon-greedy so the system exploits winners while continuing to explore.
 
 ## Replacing the simulation with production services
 
-| Swap this…                | …for this                                                        |
+Live adapters are provided in `integrations/live/` — you inject them, or let
+`config.build_factory_from_env()` select them from environment variables.
+
+| Swap this…                | …for this (shipped in `integrations/live/`)                       |
 | ------------------------- | ---------------------------------------------------------------- |
-| `InMemoryCRM`             | A `CRM` implementation backed by Airtable / Supabase.            |
-| `TemplateGateway`         | An `AIGateway` that calls your AI gateway / LLM for copy.        |
-| `SyntheticSource`         | A `ProspectSource` that calls enrichment / search / research APIs.|
-| `ResponseModel`           | A live signal that reads real replies, bookings, and closes.     |
-| outreach `send` no-op     | A callable that hits your ESP, dialer, or voice-AI provider.     |
+| `InMemoryCRM`             | `AirtableCRM` / `SupabaseCRM` — write-through to the real backend.|
+| `TemplateGateway`         | `AnthropicGateway` — real copy from Claude (official SDK).        |
+| `SyntheticSource`         | `HttpProspectSource` — any JSON enrichment / search API.         |
+| outreach `send` no-op     | `SmtpSender` (email) / `WebhookSender` (ESP, dialer, voice AI).   |
+| `ResponseModel`           | Still bespoke — a live signal that reads real replies/closes.    |
 
-Because the orchestrator only depends on the interfaces, wiring production
-services is a matter of constructing `RevenueFactory` with the real
-implementations injected — the department logic and the daily workflow do not
-change.
+`RevenueFactory.__init__` accepts `gateway`, `crm`, `source`, and
+`outreach_send` by injection, so wiring production services never touches the
+department logic or the daily workflow.
 
-### Example: injecting a real AI gateway
+### Injection points
 
 ```python
-class MyGateway:  # satisfies integrations.AIGateway
-    def generate(self, prompt, context, *, max_words=120):
-        return call_my_llm(prompt, context)  # your AI gateway
+from aion_revenue_factory import RevenueFactory
+from aion_revenue_factory.integrations.live import AnthropicGateway, AirtableCRM
+
+factory = RevenueFactory(
+    gateway=AnthropicGateway(model="claude-opus-4-8"),
+    crm=AirtableCRM(api_key=..., base_id=...),
+)
 ```
 
-Then construct the departments with `MyGateway()` in place of `TemplateGateway()`
-(today done inside `RevenueFactory.__init__`; extract to constructor arguments
-when you wire real services).
+Or drive it all from the environment (offline fallback per service):
+
+```python
+from aion_revenue_factory import build_factory_from_env
+factory = build_factory_from_env()   # see config.py for recognized env vars
+```
+
+### Design choices in the live adapters
+
+- **Write-through CRM.** `AirtableCRM` / `SupabaseCRM` extend `InMemoryCRM` and
+  mirror every write to the backend via a single `_persist(table, record)` hook
+  (`integrations/live/write_through.py`). Reads stay local (fast dashboard), and
+  by default a transient backend outage is swallowed rather than crashing the
+  revenue loop (`raise_on_error=True` to opt out).
+- **Lazy SDK import.** Only `AnthropicGateway` needs a third-party package, and
+  it imports `anthropic` inside `__init__` — so importing the core package, or
+  even `integrations.live`, never requires it. Everything else is stdlib
+  (`urllib`, `smtplib`).
+- **Vendor-agnostic prospects.** `HttpProspectSource` takes a `map_record`
+  callable so you adapt any vendor's JSON shape without changing the source.
+- **Still bespoke: the response signal.** `ResponseModel` simulates replies,
+  bookings, and closes. In production, replace it with reads from your CRM /
+  inbox / calendar so the learning loop trains on real outcomes.
 
 ## Extending
 

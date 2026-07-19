@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from .config import build_factory_from_env, describe_wiring
 from .dashboard import Dashboard
 from .orchestrator import RevenueFactory
 
@@ -66,9 +67,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-seed", type=int, default=42)
     parser.add_argument("--response-seed", type=int, default=7)
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a report")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="wire live integrations from environment variables where configured",
+    )
+    parser.add_argument(
+        "--describe-wiring",
+        action="store_true",
+        help="print which integrations are live vs offline, then exit",
+    )
     args = parser.parse_args(argv)
 
-    factory = RevenueFactory(source_seed=args.source_seed, response_seed=args.response_seed)
+    if args.describe_wiring:
+        print(json.dumps(describe_wiring(), indent=2))
+        return 0
+
+    if args.live:
+        print(f"Wiring: {json.dumps(describe_wiring())}")
+        factory = build_factory_from_env(
+            source_seed=args.source_seed, response_seed=args.response_seed
+        )
+    else:
+        factory = RevenueFactory(
+            source_seed=args.source_seed, response_seed=args.response_seed
+        )
     results = factory.run_days(args.days, prospects=args.prospects)
     today_revenue = results[-1].revenue if results else 0.0
     metrics = Dashboard(factory.crm).metrics(today_revenue=today_revenue)

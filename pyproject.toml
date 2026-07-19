@@ -14,7 +14,10 @@ keywords = ["ai", "sales", "revenue", "automation", "agents", "crm"]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+# Live adapters. Only the Claude gateway needs a third-party SDK; the Airtable,
+# Supabase, prospect, and outreach adapters use the standard library.
+live = ["anthropic>=0.40"]
+dev = ["pytest>=7", "anthropic>=0.40"]
 
 [project.scripts]
 aion-revenue-factory = "aion_revenue_factory.cli:main"
