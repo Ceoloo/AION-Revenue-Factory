@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from .config import build_factory_from_env, describe_wiring
 from .dashboard import Dashboard
@@ -84,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.live:
-        print(f"Wiring: {json.dumps(describe_wiring())}")
+        # Send the wiring banner to stderr so it never corrupts `--json` stdout.
+        print(f"Wiring: {json.dumps(describe_wiring())}", file=sys.stderr)
         factory = build_factory_from_env(
             source_seed=args.source_seed, response_seed=args.response_seed
         )

@@ -3,8 +3,10 @@
 import json
 
 from aion_revenue_factory import Dashboard, build_factory_from_env, describe_wiring
+from aion_revenue_factory.cli import main
 from aion_revenue_factory.integrations import InMemoryCRM, TemplateGateway
 from aion_revenue_factory.integrations.live import AirtableCRM, AnthropicGateway
+from aion_revenue_factory.integrations.live.write_through import WriteThroughCRM
 
 
 def test_describe_wiring_all_offline():
@@ -93,3 +95,41 @@ def test_end_to_end_run_through_live_adapters(monkeypatch):
     assert len(sends) == result.contacted
     metrics = Dashboard(factory.crm).metrics()
     assert isinstance(metrics["total_revenue"], float)
+
+
+class _RecordingCRM(WriteThroughCRM):
+    """Captures what each write-through persist would send to a live backend."""
+
+    def __init__(self):
+        super().__init__()
+        self.persisted = []
+
+    def _persist(self, table, record):
+        self.persisted.append((table, record))
+
+
+def test_live_crm_persists_final_proposal_outcome():
+    """Regression: live CRMs must receive the real won/lost outcome, not null."""
+    from aion_revenue_factory import RevenueFactory
+
+    crm = _RecordingCRM()
+    factory = RevenueFactory(crm=crm)
+    factory.run_days(3, prospects=40)
+
+    proposal_writes = [
+        rec for table, rec in crm.persisted if table == crm.tables["proposals"]
+    ]
+    assert proposal_writes, "expected proposals to be persisted"
+    # At least one proposal must have been persisted with a decided outcome
+    # (won=True/False), proving the post-close re-save reaches the backend.
+    assert any(rec["won"] is not None for rec in proposal_writes)
+
+
+def test_live_json_output_is_clean(capsys):
+    """`--live --json` must emit parseable JSON on stdout (banner -> stderr)."""
+    rc = main(["--live", "--days", "1", "--json"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    parsed = json.loads(captured.out)  # raises if stdout isn't pure JSON
+    assert "metrics" in parsed
+    assert "Wiring:" in captured.err  # banner went to stderr

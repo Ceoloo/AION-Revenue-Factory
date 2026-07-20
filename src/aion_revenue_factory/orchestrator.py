@@ -213,6 +213,10 @@ class RevenueFactory:
                         value=proposal.amount, **base_interaction
                     )
                 )
+            # Re-persist the proposal now that the close decision has set `won`,
+            # so live CRMs record the real outcome (the earlier save wrote the
+            # pre-decision snapshot with won=None).
+            self.crm.save_proposal(proposal)
             self.crm.upsert_deal(deal)
 
         # Feed everything back into the learning loop for tomorrow.
