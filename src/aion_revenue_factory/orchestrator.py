@@ -28,6 +28,13 @@ from .departments import (
     SyntheticSource,
 )
 from .domain import Deal, Interaction, Stage
+from .governance import Decision, GovernanceLedger
+from .governance_agents import (
+    OUTREACH_COST_PER_MESSAGE,
+    OUTREACH_TOOL,
+    GovernedWorkforce,
+    build_default_workforce,
+)
 from .integrations import InMemoryCRM, KnowledgeBase, TemplateGateway
 
 
@@ -82,6 +89,7 @@ class RevenueFactory:
         gateway=None,
         source=None,
         outreach_send=None,
+        workforce: GovernedWorkforce | None = None,
     ) -> None:
         """Wire the departments together.
 
@@ -95,6 +103,9 @@ class RevenueFactory:
           HttpProspectSource for real enrichment APIs).
         - ``outreach_send``: a callable that actually sends a message (default
           offline no-op; inject SmtpSender / WebhookSender).
+        - ``workforce``: the governed AI employees + Agent Governance Ledger
+          (default: every outreach employee provisioned with a bounded daily
+          spend authority). Every send is authorized against it.
         """
         self.crm = crm or InMemoryCRM()
         self.knowledge = knowledge or KnowledgeBase()
@@ -115,6 +126,10 @@ class RevenueFactory:
         self.coach = DealCoach(self.knowledge)
         self.success = CustomerSuccess()
         self.learning = LearningEngine(self.knowledge)
+
+        # The governed AI employees + the enforcement gate in front of dispatch.
+        self.workforce = workforce or build_default_workforce()
+        self.ledger: GovernanceLedger = self.workforce.ledger
 
         self.responses = ResponseModel(seed=response_seed)
         self._day = 0
@@ -143,18 +158,47 @@ class RevenueFactory:
                 agent=self.outreach.agent_for(channel),
             )
 
-            msg = self.outreach.compose(opp, offer, channel)
-            self.outreach.send(msg)
-            self.crm.save_message(msg)
-            deal.advance(Stage.CONTACTED)
-            contacted += 1
-
             base_interaction = dict(
                 opportunity_id=opp.id,
                 channel=channel,
                 offer_type=offer.offer_type,
                 industry=opp.industry,
             )
+
+            msg = self.outreach.compose(opp, offer, channel)
+
+            # Governance gate: authorize this AI employee's outward dispatch
+            # before it happens. A denied or escalated send never leaves the
+            # building -- the ledger is the enforcement layer, not a log.
+            agent_id = self.workforce.agent_id_for(channel)
+            verdict = self.ledger.authorize(
+                agent_id,
+                OUTREACH_TOOL,
+                amount=OUTREACH_COST_PER_MESSAGE,
+                context={"opportunity_id": opp.id, "channel": channel.value},
+                correlation_id=deal.id,
+            )
+            if verdict.decision is not Decision.ALLOW:
+                deal.advance(Stage.LOST)
+                self.crm.upsert_deal(deal)
+                interactions.append(
+                    Interaction(
+                        step="outreach", outcome="blocked", agent=deal.agent,
+                        metadata={"reason": verdict.reason, "decision": verdict.decision.value},
+                        **base_interaction,
+                    )
+                )
+                continue
+
+            self.outreach.send(msg)
+            # Record the executed side effect so the action history is complete.
+            self.ledger.record_execution(
+                agent_id, OUTREACH_TOOL,
+                amount=OUTREACH_COST_PER_MESSAGE, correlation_id=deal.id,
+            )
+            self.crm.save_message(msg)
+            deal.advance(Stage.CONTACTED)
+            contacted += 1
 
             if not self.responses.replies(opp.scores.buying_intent):
                 deal.advance(Stage.LOST)

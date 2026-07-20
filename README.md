@@ -111,6 +111,42 @@ and **Revenue Analyst**.
 
 ---
 
+## Agent governance (enforcement)
+
+Every AI employee is a **uniquely-identified, individually-governed agent**, not
+a share of one broad account. Each outreach employee is provisioned in the
+**Agent Governance Ledger** (`governance/`, vendored from `aion_platform`) with
+its own identity, a defined objective, an explicit approved-tool grant, a
+bounded daily spending authority, and escalation conditions.
+
+The ledger is wired into the orchestrator as an **enforcement gate**: before any
+employee dispatches an outreach message, the orchestrator calls
+`ledger.authorize(agent_id, "outreach.send", amount=...)`. A `DENY` or
+`ESCALATE` verdict means the send never leaves the building — the deal is marked
+lost/blocked instead of contacted. Every verdict (allow, deny, escalate) and
+every executed send is written to a tamper-evident, hash-chained action history
+(`ledger.verify_integrity()`).
+
+```python
+from aion_revenue_factory.orchestrator import RevenueFactory
+from aion_revenue_factory.domain import Channel
+
+f = RevenueFactory()
+f.run_day(40)                                   # every send is authorized + recorded
+
+# Revoke one employee's identity -> its sends are blocked on the next run,
+# while the other channels keep operating. Attributable, reversible, audited.
+f.ledger.revoke_agent(f.workforce.agent_id_for(Channel.EMAIL), reason="compromised")
+f.run_day(40)
+assert f.ledger.verify_integrity()
+```
+
+Spend authorities, tool grants, credentials, and escalation are all configured
+per agent in `governance_agents.py`; inject a custom `workforce=` to tighten or
+relax them. See `AGENT_GOVERNANCE_LEDGER.md` in `aion-company-os` for the model.
+
+---
+
 ## The daily autonomous workflow
 
 The Hermes-style orchestrator (`orchestrator.py`) composes the departments into
@@ -155,8 +191,10 @@ src/aion_revenue_factory/
 ├── domain/            # dataclasses + enums: the shared vocabulary
 ├── integrations/      # CRM, AI gateway, knowledge base (interfaces + refs)
 ├── departments/       # the eight departments
+├── governance/        # Agent Governance Ledger (vendored enforcement layer)
+├── governance_agents.py # provisions each AI employee as a governed identity
 ├── scoring.py         # opportunity scoring
-├── orchestrator.py    # the Hermes-style daily workflow
+├── orchestrator.py    # the Hermes-style daily workflow (authorizes every send)
 ├── dashboard.py       # live revenue metrics
 └── cli.py             # `python -m aion_revenue_factory`
 tests/                 # pytest suite
