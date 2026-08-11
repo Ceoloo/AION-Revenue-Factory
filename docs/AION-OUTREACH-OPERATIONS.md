@@ -50,10 +50,29 @@ export DATABASE_URL=postgresql://user:pass@host/db     # Postgres/Supabase
 store, queued sends persist across restarts and the database's unique
 constraints prevent duplicate sends / duplicate event processing even after a
 crash mid-batch. Switching stores changes no engine code (identical
-`OutreachStore` interface). Multi-worker note: run a single queue worker per
-store for V1.1; concurrent workers want `SELECT … FOR UPDATE SKIP LOCKED`
-claiming (a planned hardening) — the unique idempotency key already prevents
-duplicate *enqueue*.
+`OutreachStore` interface).
+
+## Running multiple workers
+
+The worker is safe to run concurrently across processes/hosts against one
+durable store. Each `process_once` cycle:
+
+1. **Reclaims stale claims** — items a crashed worker left in `PROCESSING`
+   longer than `OUTREACH_CLAIM_STALE_SECONDS` (default 900s) return to
+   `PENDING`, so no send is lost when a worker dies mid-batch.
+2. **Claims atomically** — due items are claimed with Postgres
+   `SELECT ... FOR UPDATE SKIP LOCKED` (sqlite uses `BEGIN IMMEDIATE` + a
+   conditional `UPDATE ... WHERE status='pending'` guard). Two workers never
+   claim the same item, so the same email is never sent twice.
+3. **Processes only what it claimed**, releasing items back to `PENDING` when a
+   per-campaign daily limit defers them.
+
+Give each worker a distinct identity via `worker_id` (defaults to
+`host:pid:rand`); it appears in the structured `queue.reclaimed` / `email.sent`
+logs so sends are attributable. No coordinator or lock server is required — the
+database is the coordination point. Set `OUTREACH_CLAIM_STALE_SECONDS` above
+your longest realistic single-send time so healthy-but-slow sends aren't
+reclaimed out from under a worker.
 
 ## Queue management
 

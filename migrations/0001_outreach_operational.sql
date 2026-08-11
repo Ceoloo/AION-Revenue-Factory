@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS outreach_queue (
     status          TEXT,
     scheduled_at    TEXT,
     completed_day   TEXT,
+    claimed_at      TEXT,                   -- when a worker claimed it (multi-worker)
     data            TEXT NOT NULL
 );
 
@@ -78,6 +79,7 @@ CREATE INDEX IF NOT EXISTS ix_outreach_queue_campaign    ON outreach_queue (camp
 CREATE INDEX IF NOT EXISTS ix_outreach_queue_lead        ON outreach_queue (lead_id);
 CREATE INDEX IF NOT EXISTS ix_outreach_queue_sched       ON outreach_queue (scheduled_at);
 CREATE INDEX IF NOT EXISTS ix_outreach_queue_sentday     ON outreach_queue (status, completed_day);
+CREATE INDEX IF NOT EXISTS ix_outreach_queue_claimed     ON outreach_queue (status, claimed_at);
 CREATE INDEX IF NOT EXISTS ix_outreach_messages_provider ON outreach_messages (provider_message_id);
 CREATE INDEX IF NOT EXISTS ix_outreach_events_campaign   ON outreach_events (campaign_id);
 CREATE INDEX IF NOT EXISTS ix_outreach_events_type       ON outreach_events (event_type);

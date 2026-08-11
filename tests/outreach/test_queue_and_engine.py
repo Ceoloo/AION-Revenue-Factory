@@ -120,7 +120,10 @@ def test_global_daily_limit_enforced(config, campaign):
     system.engine.enqueue_due(campaign, now=IN_WINDOW)
     result = system.worker.process_once(now=IN_WINDOW)
     assert result.sent == 2  # refuses to exceed the global daily limit
-    assert result.skipped >= 1
+    # The rest are never claimed — they wait as PENDING for a later cycle/day.
+    assert len(system.store.queue_items(QueueStatus.PENDING)) == 3
+    # A second cycle the same day still sends nothing (budget spent).
+    assert system.worker.process_once(now=IN_WINDOW).sent == 0
 
 
 def test_segment_by_icp_and_industry():

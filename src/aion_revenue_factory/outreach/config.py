@@ -99,6 +99,9 @@ class OutreachConfig:
     # Retry policy
     max_attempts: int = 3
     retry_base_seconds: float = 60.0
+    # Multi-worker: a claimed item whose worker went silent this long is
+    # reclaimed (returned to PENDING) by the next worker cycle.
+    claim_stale_seconds: float = 900.0
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "OutreachConfig":
@@ -134,6 +137,7 @@ class OutreachConfig:
             window=window,
             max_attempts=int(env.get("OUTREACH_MAX_ATTEMPTS", "3") or "3"),
             retry_base_seconds=float(env.get("OUTREACH_RETRY_BASE_SECONDS", "60") or "60"),
+            claim_stale_seconds=float(env.get("OUTREACH_CLAIM_STALE_SECONDS", "900") or "900"),
         )
 
     def tzinfo(self):

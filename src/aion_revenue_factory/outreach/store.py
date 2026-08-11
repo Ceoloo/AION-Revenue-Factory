@@ -13,6 +13,7 @@ The in-memory store enforces the two uniqueness rules the engine depends on:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from .enums import QueueStatus
@@ -48,6 +49,8 @@ class OutreachStore(Protocol):
     def queue_items(self, status: Optional[QueueStatus] = None) -> list[QueueItem]: ...
     def save_queue_item(self, item: QueueItem) -> None: ...
     def sends_on(self, day_iso: str, campaign_id: Optional[str] = None) -> int: ...
+    def claim_due(self, now: datetime, limit: int, worker_id: str = "") -> list[QueueItem]: ...
+    def reclaim_stale(self, now: datetime, older_than_seconds: float) -> int: ...
     # messages / events / generations
     def save_message(self, message: EmailMessage) -> None: ...
     def get_message(self, message_id: str) -> Optional[EmailMessage]: ...
@@ -59,6 +62,13 @@ class OutreachStore(Protocol):
     def add_suppression(self, entry: SuppressionEntry) -> None: ...
     def is_suppressed(self, email: str) -> bool: ...
     def suppression_entries(self) -> list[SuppressionEntry]: ...
+
+
+def _aware(dt: datetime) -> datetime:
+    """Coerce a possibly-naive datetime to timezone-aware UTC for comparison."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class InMemoryOutreachStore:
@@ -146,6 +156,42 @@ class InMemoryOutreachStore:
                 continue
             count += 1
         return count
+
+    def claim_due(self, now: datetime, limit: int, worker_id: str = "") -> list[QueueItem]:
+        """Atomically claim up to ``limit`` due PENDING items, marking them
+        PROCESSING. Single-process store, so a plain in-memory transition is
+        already atomic; the SQL stores enforce this across processes.
+        """
+        now = _aware(now)
+        due = [
+            i for i in self._queue.values()
+            if i.status is QueueStatus.PENDING and _aware(i.scheduled_at) <= now
+        ]
+        due.sort(key=lambda i: i.scheduled_at)
+        claimed: list[QueueItem] = []
+        for item in due[: max(limit, 0)]:
+            item.status = QueueStatus.PROCESSING
+            item.claimed_by = worker_id
+            item.claimed_at = now
+            claimed.append(item)
+        return claimed
+
+    def reclaim_stale(self, now: datetime, older_than_seconds: float) -> int:
+        """Reset PROCESSING items claimed before the cutoff back to PENDING.
+
+        This is how a worker that died mid-send releases its items so another
+        worker can pick them up.
+        """
+        cutoff = _aware(now) - timedelta(seconds=older_than_seconds)
+        reclaimed = 0
+        for item in self._queue.values():
+            if item.status is QueueStatus.PROCESSING and item.claimed_at is not None:
+                if _aware(item.claimed_at) < cutoff:
+                    item.status = QueueStatus.PENDING
+                    item.claimed_by = ""
+                    item.claimed_at = None
+                    reclaimed += 1
+        return reclaimed
 
     # ---- messages / events / generations ----
     def save_message(self, message: EmailMessage) -> None:

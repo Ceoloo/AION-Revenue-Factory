@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from .enums import QueueStatus
@@ -67,7 +68,7 @@ _DDL = [
     """CREATE TABLE IF NOT EXISTS outreach_queue (
         id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
         campaign_id TEXT, lead_id TEXT, step_id TEXT, status TEXT,
-        scheduled_at TEXT, completed_day TEXT, data TEXT NOT NULL)""",
+        scheduled_at TEXT, completed_day TEXT, claimed_at TEXT, data TEXT NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS outreach_messages (
         id TEXT PRIMARY KEY, provider_message_id TEXT, data TEXT NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS outreach_events (
@@ -85,6 +86,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_outreach_queue_lead ON outreach_queue (lead_id)",
     "CREATE INDEX IF NOT EXISTS ix_outreach_queue_sched ON outreach_queue (scheduled_at)",
     "CREATE INDEX IF NOT EXISTS ix_outreach_queue_sentday ON outreach_queue (status, completed_day)",
+    "CREATE INDEX IF NOT EXISTS ix_outreach_queue_claimed ON outreach_queue (status, claimed_at)",
     "CREATE INDEX IF NOT EXISTS ix_outreach_messages_provider ON outreach_messages (provider_message_id)",
     "CREATE INDEX IF NOT EXISTS ix_outreach_events_campaign ON outreach_events (campaign_id)",
     "CREATE INDEX IF NOT EXISTS ix_outreach_events_type ON outreach_events (event_type)",
@@ -98,10 +100,25 @@ class Dialect:
     """Minimal per-driver differences."""
 
     placeholder: str = "?"  # sqlite "?", psycopg "%s"
+    # SELECT ... FOR UPDATE SKIP LOCKED is the Postgres claim primitive; sqlite
+    # has no row locks (it serializes writers), so it claims under BEGIN IMMEDIATE.
+    supports_skip_locked: bool = False
+    # Statement that opens the claim transaction. Empty means the driver starts
+    # one implicitly on the first statement (psycopg with autocommit off).
+    begin_stmt: str = "BEGIN IMMEDIATE"
 
 
-SQLITE = Dialect(placeholder="?")
-POSTGRES = Dialect(placeholder="%s")
+SQLITE = Dialect(placeholder="?", supports_skip_locked=False, begin_stmt="BEGIN IMMEDIATE")
+POSTGRES = Dialect(placeholder="%s", supports_skip_locked=True, begin_stmt="")
+
+
+def _col_dt(dt: Optional[datetime]) -> Optional[str]:
+    """Canonical UTC ISO string for a timestamp column (stable lexical order)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 class SqlOutreachStore:
@@ -134,6 +151,22 @@ class SqlOutreachStore:
                     result = cur.rowcount
                 self._conn.commit()
                 return result
+            finally:
+                cur.close()
+
+    def _transaction(self, work: Callable):
+        """Run ``work(cursor)`` in one atomic transaction (for claim/reclaim)."""
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                if self._dialect.begin_stmt:
+                    cur.execute(self._dialect.begin_stmt)
+                result = work(cur)
+                self._conn.commit()
+                return result
+            except Exception:
+                self._conn.rollback()
+                raise
             finally:
                 cur.close()
 
@@ -215,13 +248,12 @@ class SqlOutreachStore:
     def enqueue(self, item: QueueItem) -> bool:
         rowcount = self._exec(
             "INSERT INTO outreach_queue "
-            "(id, idempotency_key, campaign_id, lead_id, step_id, status, scheduled_at, completed_day, data) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING",
+            "(id, idempotency_key, campaign_id, lead_id, step_id, status, scheduled_at, completed_day, claimed_at, data) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING",
             (
                 item.id, item.idempotency_key, item.campaign_id, item.lead_id, item.step_id,
-                item.status.value,
-                item.scheduled_at.isoformat() if item.scheduled_at else None,
-                self._completed_day(item), to_json(item),
+                item.status.value, _col_dt(item.scheduled_at),
+                self._completed_day(item), _col_dt(item.claimed_at), to_json(item),
             ),
         )
         return bool(rowcount)
@@ -245,17 +277,76 @@ class SqlOutreachStore:
     def save_queue_item(self, item: QueueItem) -> None:
         self._exec(
             "INSERT INTO outreach_queue "
-            "(id, idempotency_key, campaign_id, lead_id, step_id, status, scheduled_at, completed_day, data) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "(id, idempotency_key, campaign_id, lead_id, step_id, status, scheduled_at, completed_day, claimed_at, data) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT (id) DO UPDATE SET status=excluded.status, scheduled_at=excluded.scheduled_at, "
-            "completed_day=excluded.completed_day, data=excluded.data",
+            "completed_day=excluded.completed_day, claimed_at=excluded.claimed_at, data=excluded.data",
             (
                 item.id, item.idempotency_key, item.campaign_id, item.lead_id, item.step_id,
-                item.status.value,
-                item.scheduled_at.isoformat() if item.scheduled_at else None,
-                self._completed_day(item), to_json(item),
+                item.status.value, _col_dt(item.scheduled_at),
+                self._completed_day(item), _col_dt(item.claimed_at), to_json(item),
             ),
         )
+
+    def claim_due(self, now: datetime, limit: int, worker_id: str = "") -> list[QueueItem]:
+        """Atomically claim up to ``limit`` due PENDING items across workers.
+
+        Postgres selects candidates ``FOR UPDATE SKIP LOCKED`` (concurrent
+        workers never see each other's rows); sqlite claims under a
+        ``BEGIN IMMEDIATE`` write transaction. In both cases the per-row
+        ``UPDATE ... WHERE id=? AND status='pending'`` guard is the atomic
+        commit point, so an item is claimed by exactly one worker.
+        """
+        if limit <= 0:
+            return []
+        now_iso = _col_dt(now)
+        lock_clause = " FOR UPDATE SKIP LOCKED" if self._dialect.supports_skip_locked else ""
+
+        def work(cur):
+            cur.execute(self._q(
+                "SELECT id, data FROM outreach_queue WHERE status=? AND scheduled_at <= ? "
+                "ORDER BY scheduled_at LIMIT ?" + lock_clause),
+                (QueueStatus.PENDING.value, now_iso, limit))
+            rows = cur.fetchall()
+            claimed: list[QueueItem] = []
+            for item_id, data in rows:
+                item = queue_item_from_dict(_json(data))
+                item.status = QueueStatus.PROCESSING
+                item.claimed_by = worker_id
+                item.claimed_at = _now_utc(now)
+                cur.execute(self._q(
+                    "UPDATE outreach_queue SET status=?, claimed_at=?, data=? "
+                    "WHERE id=? AND status=?"),
+                    (item.status.value, _col_dt(item.claimed_at), to_json(item),
+                     item_id, QueueStatus.PENDING.value))
+                if cur.rowcount == 1:
+                    claimed.append(item)
+            return claimed
+
+        return self._transaction(work)
+
+    def reclaim_stale(self, now: datetime, older_than_seconds: float) -> int:
+        """Return items claimed before the cutoff to PENDING (crashed workers)."""
+        cutoff = _now_utc(now) - timedelta(seconds=older_than_seconds)
+        cutoff_iso = _col_dt(cutoff)
+
+        def work(cur):
+            cur.execute(self._q(
+                "SELECT id, data FROM outreach_queue "
+                "WHERE status=? AND claimed_at IS NOT NULL AND claimed_at < ?"),
+                (QueueStatus.PROCESSING.value, cutoff_iso))
+            rows = cur.fetchall()
+            for item_id, data in rows:
+                item = queue_item_from_dict(_json(data))
+                item.status = QueueStatus.PENDING
+                item.claimed_by = ""
+                item.claimed_at = None
+                cur.execute(self._q(
+                    "UPDATE outreach_queue SET status=?, claimed_at=?, data=? WHERE id=?"),
+                    (item.status.value, None, to_json(item), item_id))
+            return len(rows)
+
+        return self._transaction(work)
 
     def sends_on(self, day_iso: str, campaign_id: Optional[str] = None) -> int:
         if campaign_id is not None:
@@ -341,6 +432,12 @@ def _json(value):
     return json.loads(value)
 
 
+def _now_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 class SqliteOutreachStore(SqlOutreachStore):
     """Durable, stdlib-only store (sqlite). Great for a single-node deployment.
 
@@ -352,8 +449,13 @@ class SqliteOutreachStore(SqlOutreachStore):
     def __init__(self, path: str = ":memory:") -> None:
         import sqlite3
 
-        conn = sqlite3.connect(path, check_same_thread=False)
+        # isolation_level=None -> autocommit: normal writes commit immediately,
+        # and the claim path manages its own BEGIN IMMEDIATE transaction. WAL +
+        # busy_timeout let concurrent worker processes serialize cleanly rather
+        # than error with "database is locked".
+        conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         super().__init__(conn, SQLITE)
 
 
@@ -385,5 +487,9 @@ class PostgresOutreachStore(SqlOutreachStore):
                         "PostgresOutreachStore requires psycopg. Install with "
                         "`pip install 'aion-revenue-factory[postgres]'`."
                     ) from exc
-                connection = psycopg.connect(dsn, autocommit=True)
+                # autocommit off: the claim path relies on an explicit
+                # transaction so SELECT ... FOR UPDATE SKIP LOCKED holds its row
+                # locks until the claiming UPDATEs commit. Ordinary writes commit
+                # per-statement via _exec.
+                connection = psycopg.connect(dsn, autocommit=False)
         super().__init__(connection, POSTGRES, ensure_schema=ensure_schema)

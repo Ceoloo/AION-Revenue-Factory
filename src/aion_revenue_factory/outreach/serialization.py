@@ -90,6 +90,7 @@ def queue_item_from_dict(d: dict) -> QueueItem:
     d["last_attempt_at"] = _dt(d.get("last_attempt_at"))
     d["created_at"] = _dt(d.get("created_at")) or datetime.utcnow()
     d["completed_at"] = _dt(d.get("completed_at"))
+    d["claimed_at"] = _dt(d.get("claimed_at"))
     return QueueItem(**d)
 
 

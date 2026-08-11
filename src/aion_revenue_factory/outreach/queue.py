@@ -10,10 +10,19 @@ drains the queue. The worker is the single place that:
 - calls the ``EmailProvider``,
 - applies retry with exponential backoff, never retrying permanent failures,
 - records the resulting message, event, and lead state transition.
+
+Multiple workers can run against one durable store safely: each item is
+*claimed* atomically (``store.claim_due`` — Postgres ``FOR UPDATE SKIP LOCKED``,
+sqlite ``BEGIN IMMEDIATE``) before it is processed, so two workers never send
+the same email. Items stranded by a crashed worker are returned to the queue by
+``store.reclaim_stale`` at the top of every cycle.
 """
 
 from __future__ import annotations
 
+import os
+import socket
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -54,6 +63,7 @@ class QueueWorker:
         config: OutreachConfig,
         *,
         personalizer: Optional[AIPersonalizer] = None,
+        worker_id: Optional[str] = None,
     ) -> None:
         self.store = store
         self.provider = provider
@@ -61,18 +71,8 @@ class QueueWorker:
         self.personalizer = personalizer or AIPersonalizer(
             gateway, store, model_name=getattr(provider, "name", "template")
         )
-
-    # ---- limits ----
-    def _daily_room(self, campaign_id: str, day_iso: str) -> tuple[int, int]:
-        """Remaining sends allowed today, (global_room, campaign_room)."""
-        global_sent = self.store.sends_on(day_iso)
-        campaign_sent = self.store.sends_on(day_iso, campaign_id)
-        campaign = self.store.get_campaign(campaign_id)
-        campaign_limit = campaign.daily_send_limit if campaign else self.config.max_daily_sends
-        return (
-            self.config.max_daily_sends - global_sent,
-            campaign_limit - campaign_sent,
-        )
+        # A stable-per-process identity so claims are attributable in logs.
+        self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
 
     def _variables(self, lead, campaign) -> dict:
         variables = {
@@ -87,44 +87,68 @@ class QueueWorker:
         variables.update(self.config.default_variables())
         return variables
 
+    def _release(self, item: QueueItem) -> None:
+        """Return a claimed item to the queue (unclaim) — e.g. deferred by a limit."""
+        item.status = QueueStatus.PENDING
+        item.claimed_by = ""
+        item.claimed_at = None
+        self.store.save_queue_item(item)
+
     def process_once(self, *, now: Optional[datetime] = None, limit: int = 100) -> ProcessResult:
-        """Process due PENDING queue items. Returns a summary."""
+        """Claim and process due queue items. Returns a summary.
+
+        Safe to run concurrently across workers: items are claimed atomically
+        before processing, and items stranded by a crashed worker are reclaimed
+        first.
+        """
         now = now or datetime.now(timezone.utc)
         day_iso = now.date().isoformat()
         reasons: dict[str, int] = {}
-        sent = skipped = failed = processed = 0
+        sent = skipped = failed = 0
 
         def bump(reason: str) -> None:
             reasons[reason] = reasons.get(reason, 0) + 1
 
-        due = [
-            item
-            for item in self.store.queue_items(QueueStatus.PENDING)
-            if _as_utc(item.scheduled_at) <= _as_utc(now)
-        ]
-        due.sort(key=lambda i: i.scheduled_at)
+        # 0. Recover items abandoned by a worker that died mid-send.
+        reclaimed = self.store.reclaim_stale(now, self.config.claim_stale_seconds)
+        if reclaimed:
+            log_event("queue.reclaimed", worker=self.worker_id, count=reclaimed)
 
-        for item in due:
-            if processed >= limit:
-                break
-
-            # Sending window: hold (do not fail) items outside the window.
-            if not within_sending_window(self.config, now):
-                skipped += 1
+        # 1. Sending window: hold everything (don't claim) until the window opens.
+        if not within_sending_window(self.config, now):
+            due = [i for i in self.store.queue_items(QueueStatus.PENDING)
+                   if _as_utc(i.scheduled_at) <= _as_utc(now)]
+            if due:
                 bump("outside_window")
-                continue
+            return ProcessResult(processed=0, sent=0, skipped=len(due), failed=0, reasons=reasons)
 
-            global_room, campaign_room = self._daily_room(item.campaign_id, day_iso)
-            if global_room <= 0:
-                skipped += 1
-                bump("global_daily_limit")
-                continue
-            if campaign_room <= 0:
+        # 2. Bound the claim by the remaining global daily budget — the system
+        #    refuses to exceed it, and unclaimed items simply wait for a later
+        #    cycle/day (they stay PENDING).
+        global_room = self.config.max_daily_sends - self.store.sends_on(day_iso)
+        if global_room <= 0:
+            bump("global_daily_limit")
+            return ProcessResult(processed=0, sent=0, skipped=0, failed=0, reasons=reasons)
+
+        batch = min(limit, global_room)
+        claimed = self.store.claim_due(now, batch, self.worker_id)
+
+        for item in claimed:
+            # Per-campaign daily limit: defer (release) rather than send.
+            campaign = self.store.get_campaign(item.campaign_id)
+            campaign_limit = campaign.daily_send_limit if campaign else self.config.max_daily_sends
+            if self.store.sends_on(day_iso, item.campaign_id) >= campaign_limit:
+                self._release(item)
                 skipped += 1
                 bump("campaign_daily_limit")
                 continue
+            # Global budget can be exhausted mid-batch by earlier sends.
+            if self.store.sends_on(day_iso) >= self.config.max_daily_sends:
+                self._release(item)
+                skipped += 1
+                bump("global_daily_limit")
+                continue
 
-            processed += 1
             outcome = self._process_item(item, now)
             if outcome == "sent":
                 sent += 1
@@ -136,7 +160,8 @@ class QueueWorker:
                 bump(outcome)
 
         return ProcessResult(
-            processed=processed, sent=sent, skipped=skipped, failed=failed, reasons=reasons
+            processed=sent + skipped + failed, sent=sent, skipped=skipped,
+            failed=failed, reasons=reasons,
         )
 
     def _process_item(self, item: QueueItem, now: datetime) -> str:
@@ -282,6 +307,9 @@ class QueueWorker:
         backoff = self.config.retry_base_seconds * (2 ** max(item.attempts - 1, 0))
         item.status = QueueStatus.PENDING
         item.scheduled_at = _as_utc(now) + timedelta(seconds=backoff)
+        # Release the claim so any worker can pick it up when it comes due again.
+        item.claimed_by = ""
+        item.claimed_at = None
         self.store.save_queue_item(item)
         log_event("email.retry", level="warning", request_id=req, campaign_id=item.campaign_id,
                   lead_id=item.lead_id, queue_id=item.id, error=error, attempts=item.attempts,

@@ -226,6 +226,11 @@ class QueueItem:
     error: str = ""
     created_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
+    # Multi-worker claim: which worker is processing this item, and since when.
+    # Set atomically when claimed; cleared on release/retry; used to reclaim
+    # items stranded by a worker that died mid-send.
+    claimed_by: str = ""
+    claimed_at: Optional[datetime] = None
     id: str = field(default_factory=lambda: _new_id("q"))
 
     @property

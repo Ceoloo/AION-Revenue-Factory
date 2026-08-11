@@ -122,12 +122,21 @@ route) mounts `WebhookProcessor.handle()` and `health.*` the same way.
 
 ## 6. Queue architecture
 
-In-process, store-backed queue with an idempotent worker. Statuses:
+Store-backed queue with an idempotent, **claim-based** worker. Statuses:
 `PENDING → PROCESSING → SENT | FAILED | CANCELLED`. Retries use exponential
 backoff (`base * 2^attempt`) up to `max_attempts`; **permanent** failures
 (invalid recipient, suppressed, hard bounce) are not retried. The worker
 enforces the sending window, the per-campaign `daily_send_limit`, and the
 global `MAX_DAILY_SENDS` — it **refuses** to exceed configured limits.
+
+**Multiple workers** run concurrently against one durable store. Each cycle
+first `reclaim_stale`s items a crashed worker abandoned (claimed >
+`claim_stale_seconds` ago), then `claim_due` atomically claims a batch —
+Postgres `SELECT … FOR UPDATE SKIP LOCKED`, sqlite `BEGIN IMMEDIATE` + a
+conditional `UPDATE … WHERE status='pending'`. Because claiming is atomic, two
+workers never process the same item, and a worker that dies mid-send strands
+nothing permanently. The database is the only coordination point — no lock
+server.
 
 ## 7. Deployment architecture
 
