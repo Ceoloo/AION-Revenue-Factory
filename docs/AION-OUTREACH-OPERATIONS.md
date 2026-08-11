@@ -36,6 +36,25 @@ system.reply_poll = None                # reply detection: PENDING (see below)
   eligibility + suppression at send time, personalizes, sends, and records the
   message/event/state transition. It returns a `ProcessResult` summary.
 
+## Durable operational store
+
+Set `DATABASE_URL` so operational state survives restarts:
+
+```bash
+export DATABASE_URL=sqlite:///outreach.db              # durable, stdlib only
+export DATABASE_URL=postgresql://user:pass@host/db     # Postgres/Supabase
+```
+
+`describe-wiring` and `/api/health` report which store is active. In-memory
+(unset `DATABASE_URL`) is dev-only — a restart drops the queue. With a durable
+store, queued sends persist across restarts and the database's unique
+constraints prevent duplicate sends / duplicate event processing even after a
+crash mid-batch. Switching stores changes no engine code (identical
+`OutreachStore` interface). Multi-worker note: run a single queue worker per
+store for V1.1; concurrent workers want `SELECT … FOR UPDATE SKIP LOCKED`
+claiming (a planned hardening) — the unique idempotency key already prevents
+duplicate *enqueue*.
+
 ## Queue management
 
 Statuses: `PENDING → PROCESSING → SENT | FAILED | CANCELLED`.

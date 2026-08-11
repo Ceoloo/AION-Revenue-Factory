@@ -65,16 +65,33 @@ Run the reference receiver:
 python -m aion_revenue_factory.outreach.server --port 8080
 ```
 
-## 6. Database migrations
+## 6. Operational store & database migrations
 
-V1 ships an in-memory operational store (`InMemoryOutreachStore`) plus the
-existing Airtable/Supabase write-through CRM for persisted entities. There is no
-new database server to migrate. When you back the operational store with
-Postgres/Supabase, add migrations under a `migrations/` directory (create the
-`send_queue`, `email_events`, `suppression_list`, `campaign_leads`,
-`ai_generations` tables with the indexes and unique constraints named in
-`docs/AION-OUTREACH-ARCHITECTURE.md`) and apply them via your existing migration
-tool — never mutate a production database by hand.
+The operational store (send queue, email events, suppression list, campaign
+membership, messages, AI generations) is selected by `DATABASE_URL`:
+
+| `DATABASE_URL` | Store | Durable? | Deps |
+| --- | --- | --- | --- |
+| _(unset)_ | `InMemoryOutreachStore` | No — lost on restart (dev only) | none |
+| `sqlite:///outreach.db` | `SqliteOutreachStore` | **Yes** (file) | none (stdlib) |
+| `postgresql://…` | `PostgresOutreachStore` | **Yes** | `pip install 'aion-revenue-factory[postgres]'` |
+
+All three satisfy the identical `OutreachStore` protocol, so switching is a
+config change — the campaign engine, worker, and webhook processor are
+untouched. Durability matters: with a durable store, 437 queued emails survive a
+restart, and the `UNIQUE(idempotency_key)` / `UNIQUE(dedupe_key)` constraints
+mean re-processing after a crash can't double-send or double-count.
+
+**Postgres/Supabase migration.** Apply
+[`migrations/0001_outreach_operational.sql`](../migrations/0001_outreach_operational.sql)
+via `psql` or the Supabase SQL editor. It creates the tables, indexes, and
+unique constraints; it is transactional and reversible (down migration at the
+bottom of the file). Never hand-mutate a production database — add a new
+numbered migration for schema changes. The sqlite store auto-creates the same
+schema on first use (`CREATE TABLE IF NOT EXISTS`).
+
+Airtable/Supabase remain the CRM source-of-truth for lead & revenue
+relationships; this store holds high-volume operational state.
 
 ## 7. Dry-run mode
 

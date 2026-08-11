@@ -17,6 +17,8 @@ dependencies = []
 # Live adapters. Only the Claude gateway needs a third-party SDK; the Airtable,
 # Supabase, prospect, and outreach adapters use the standard library.
 live = ["anthropic>=0.40"]
+# Durable operational store on Postgres/Supabase. sqlite (stdlib) needs nothing.
+postgres = ["psycopg[binary]>=3.1"]
 dev = ["pytest>=7", "anthropic>=0.40"]
 
 [project.scripts]

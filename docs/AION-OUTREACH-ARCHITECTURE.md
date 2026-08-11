@@ -26,9 +26,12 @@ second stack.
 
 - **Storage:** Airtable remains the CRM / source-of-truth for lead & revenue
   relationships. High-volume operational state (send queue, email events,
-  suppression) lives in the `OutreachStore` — offline `InMemoryOutreachStore`
-  by default; the same Airtable/Supabase write-through pattern applies when a
-  live store is configured. We do **not** stand up a second database server.
+  suppression) lives in the `OutreachStore`. Three implementations satisfy the
+  identical protocol: `InMemoryOutreachStore` (dev), `SqliteOutreachStore`
+  (durable, stdlib), and `PostgresOutreachStore` (durable, Postgres/Supabase via
+  `psycopg`). Selection is `DATABASE_URL`-driven — the engine never changes. The
+  SQL stores enforce the no-duplicate-send and idempotent-event guarantees with
+  database `UNIQUE` constraints, so they survive process restarts.
 - **Email:** the existing generic `send()` callable is too thin for delivery
   status, webhooks, and config validation. V1 introduces the richer
   `EmailProvider` abstraction. `SmtpSender`/`WebhookSender` remain for the
@@ -67,6 +70,8 @@ Airtable CRM ──▶ Lead sync ──▶ Campaign Engine ──▶ AI Personal
 | `enums.py`, `models.py` | Campaign, CampaignStep, Lead, CampaignLead, EmailMessage, EmailEvent, QueueItem, SuppressionEntry, AIGeneration + states |
 | `config.py` | `OutreachConfig` — env-driven: dry-run, test mode, limits, sending window, timezone, provider selection, from/reply-to, retry policy |
 | `store.py` | `OutreachStore` Protocol + `InMemoryOutreachStore` (operational state, unique-key duplicate guard) |
+| `stores.py` | Durable stores: `SqlOutreachStore` + `SqliteOutreachStore` (stdlib) + `PostgresOutreachStore` (psycopg) — same protocol, DB-enforced idempotency |
+| `serialization.py` | Lossless model ⇄ JSON (used by the SQL stores) |
 | `templates.py` | Strict `{{variable}}` rendering — unknown/missing variables fail validation |
 | `suppression.py` | Global suppression list (`check`, `add`) keyed by email |
 | `eligibility.py` | **The one canonical** `is_lead_eligible_for_send()` — every stop condition, nowhere else |

@@ -51,6 +51,11 @@ from .reply_detection import (
 )
 from .seed import build_pilot_campaign
 from .store import InMemoryOutreachStore, OutreachStore
+from .stores import (
+    PostgresOutreachStore,
+    SqliteOutreachStore,
+    SqlOutreachStore,
+)
 from .suppression import SuppressionService
 from .templates import TemplateError, render, required_variables, validate
 from .webhooks import WebhookProcessor
@@ -103,6 +108,9 @@ __all__ = [
     # store
     "OutreachStore",
     "InMemoryOutreachStore",
+    "SqlOutreachStore",
+    "SqliteOutreachStore",
+    "PostgresOutreachStore",
     # providers
     "EmailProvider",
     "ConsoleProvider",

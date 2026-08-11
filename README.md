@@ -231,8 +231,11 @@ python -m aion_revenue_factory.outreach health
 ```
 
 It defaults to **dry-run** (`OUTREACH_DRY_RUN=true`) — no real email leaves the
-building without opting in. Design, setup, operations, API, and security are
-documented in [`docs/`](docs/):
+building without opting in. Operational state (send queue, events, suppression)
+uses a pluggable, **durable** `OutreachStore`: in-memory for dev, or
+`sqlite:///…` (stdlib) / `postgresql://…` (Supabase/Postgres) via `DATABASE_URL`
+so queued sends survive restarts — the same interface either way. Design, setup,
+operations, API, and security are documented in [`docs/`](docs/):
 [Architecture](docs/AION-OUTREACH-ARCHITECTURE.md) ·
 [Setup](docs/AION-OUTREACH-SETUP.md) ·
 [Operations](docs/AION-OUTREACH-OPERATIONS.md) ·

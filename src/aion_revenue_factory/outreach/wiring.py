@@ -49,6 +49,44 @@ def _build_lead_source(env: dict) -> LeadSource:
     return SyntheticLeadSource()
 
 
+def _store_kind(env: dict) -> str:
+    """Classify DATABASE_URL into 'sqlite' | 'postgres' | 'memory' (no secrets)."""
+    url = (env.get("DATABASE_URL") or "").strip()
+    if not url:
+        return "memory"
+    if url.startswith("sqlite:"):
+        return "sqlite"
+    return "postgres"
+
+
+def _build_operational_store(env: dict) -> OutreachStore | None:
+    """Durable operational store from DATABASE_URL, else in-memory.
+
+    - ``sqlite:///path/to.db`` (or ``sqlite:///:memory:``) -> SqliteOutreachStore
+      (durable, stdlib only).
+    - any other URL (``postgresql://…``) -> PostgresOutreachStore (needs psycopg).
+    - unset -> None (caller falls back to InMemoryOutreachStore).
+    """
+    kind = _store_kind(env)
+    if kind == "memory":
+        return None
+    url = env["DATABASE_URL"].strip()
+    if kind == "sqlite":
+        from .stores import SqliteOutreachStore
+
+        # sqlite:///:memory: -> in-memory; sqlite:///rel.db -> "rel.db";
+        # sqlite:////abs.db -> "/abs.db" (strip exactly one leading slash).
+        raw = url[len("sqlite://"):]
+        if raw in ("/:memory:", ":memory:", ""):
+            path = ":memory:"
+        else:
+            path = raw[1:] if raw.startswith("/") else raw
+        return SqliteOutreachStore(path)
+    from .stores import PostgresOutreachStore
+
+    return PostgresOutreachStore(url)
+
+
 class OutreachSystem:
     """Everything wired together, ready to drive campaigns."""
 
@@ -86,6 +124,7 @@ class OutreachSystem:
 def build_outreach_from_env(env: dict | None = None, **overrides) -> OutreachSystem:
     env = os.environ if env is None else env
     config = OutreachConfig.from_env(env)
+    overrides.setdefault("store", _build_operational_store(env))
     return OutreachSystem(
         config,
         gateway=_build_gateway(env),
@@ -102,12 +141,18 @@ def describe_outreach_wiring(env: dict | None = None) -> dict:
         leads = "airtable"
     else:
         leads = "synthetic (offline)"
+    store_kind = {
+        "memory": "in_memory (offline, non-durable)",
+        "sqlite": "sqlite (durable, stdlib)",
+        "postgres": "postgres/supabase (durable)",
+    }[_store_kind(env)]
     return {
         "dry_run": config.dry_run,
         "test_mode": bool(config.test_email_address),
         "email_provider": provider,
         "gateway": "anthropic (claude)" if env.get("ANTHROPIC_API_KEY") else "template (offline)",
         "leads": leads,
+        "operational_store": store_kind,
         "max_daily_sends": config.max_daily_sends,
         "timezone": config.default_timezone,
         "reply_detection": "PENDING (no InboundEmailProvider wired)",
