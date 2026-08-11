@@ -21,6 +21,7 @@ dev = ["pytest>=7", "anthropic>=0.40"]
 
 [project.scripts]
 aion-revenue-factory = "aion_revenue_factory.cli:main"
+aion-outreach = "aion_revenue_factory.outreach.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -214,6 +214,31 @@ transient CRM outage never stops the revenue workflow. The Claude gateway uses
 the official `anthropic` SDK (imported lazily). See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full wiring reference.
 
+## AION Outreach Engine (V1)
+
+Built on the same interface/adapter conventions, the **Outreach Engine**
+(`aion_revenue_factory.outreach`) is an internal email-campaign orchestration
+system: pull leads from Airtable, segment into campaigns, personalize copy via
+the existing `AIGateway`, schedule sends through a controlled queue, send via a
+pluggable `EmailProvider` (**Resend** in V1, **SES** later), process provider
+webhooks, enforce eligibility/suppression/compliance, and report ROI.
+
+```bash
+# fully offline, nothing sent — see intended recipients, subjects, bodies
+python -m aion_revenue_factory.outreach dry-run --leads 5 --verbose
+python -m aion_revenue_factory.outreach describe-wiring
+python -m aion_revenue_factory.outreach health
+```
+
+It defaults to **dry-run** (`OUTREACH_DRY_RUN=true`) — no real email leaves the
+building without opting in. Design, setup, operations, API, and security are
+documented in [`docs/`](docs/):
+[Architecture](docs/AION-OUTREACH-ARCHITECTURE.md) ·
+[Setup](docs/AION-OUTREACH-SETUP.md) ·
+[Operations](docs/AION-OUTREACH-OPERATIONS.md) ·
+[API](docs/AION-OUTREACH-API.md) ·
+[Security](docs/AION-OUTREACH-SECURITY.md).
+
 ## Status
 
 The offline reference (rule-based intelligence, simulated prospects) runs
