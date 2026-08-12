@@ -1,0 +1,48 @@
+{
+  "generated": "2026-08-12",
+  "repository": "Ceoloo/AION-Revenue-Factory",
+  "nodes": [
+    {"id": "trigger.run_day", "type": "trigger", "label": "manual run_day/run_days", "evidence": "cli.py:88-95; orchestrator.py:236-237"},
+    {"id": "component.orchestrator", "type": "component", "label": "RevenueFactory", "evidence": "orchestrator.py:73-234"},
+    {"id": "ext.prospect_api", "type": "external_in", "label": "HTTP prospect API", "evidence": "prospect_sources.py:101-121"},
+    {"id": "ext.claude", "type": "external_in", "label": "Anthropic/Claude", "evidence": "anthropic_gateway.py:56-72"},
+    {"id": "db.opportunities", "type": "db_object", "canonical": "REVENUE"},
+    {"id": "db.deals", "type": "db_object", "canonical": "REVENUE"},
+    {"id": "db.offers", "type": "db_object", "canonical": "REVENUE"},
+    {"id": "db.messages", "type": "db_object", "canonical": "REVENUE"},
+    {"id": "db.meetings", "type": "db_object", "canonical": "REVENUE"},
+    {"id": "db.proposals", "type": "db_object", "canonical": "REVENUE"},
+    {"id": "db.customers", "type": "db_object", "canonical": "REVENUE"},
+    {"id": "db.interactions", "type": "db_object", "canonical": "REVENUE_or_EVENTS"},
+    {"id": "ext.airtable", "type": "external_out", "label": "Airtable"},
+    {"id": "ext.supabase", "type": "external_out", "label": "Supabase"},
+    {"id": "ext.smtp_esp", "type": "external_out", "label": "SMTP/ESP/dialer/voice"},
+    {"id": "canonical.REVENUE", "type": "canonical_target"}
+  ],
+  "edges": [
+    {"from": "trigger.run_day", "to": "component.orchestrator", "type": "TRIGGERS"},
+    {"from": "ext.prospect_api", "to": "db.opportunities", "type": "READS_THEN_WRITES", "evidence": "orchestrator.py:129-131"},
+    {"from": "ext.claude", "to": "db.offers", "type": "CALL_THEN_WRITES", "evidence": "orchestrator.py:135-136"},
+    {"from": "ext.claude", "to": "db.messages", "type": "CALL_THEN_WRITES", "evidence": "orchestrator.py:146-148"},
+    {"from": "ext.claude", "to": "db.proposals", "type": "CALL_THEN_WRITES", "evidence": "orchestrator.py:182-187"},
+    {"from": "component.orchestrator", "to": "db.deals", "type": "WRITES", "evidence": "orchestrator.py:161,174,216"},
+    {"from": "component.orchestrator", "to": "db.meetings", "type": "WRITES", "evidence": "orchestrator.py:177-178"},
+    {"from": "component.orchestrator", "to": "db.customers", "type": "WRITES", "evidence": "orchestrator.py:199-200"},
+    {"from": "component.orchestrator", "to": "db.interactions", "type": "WRITES", "evidence": "orchestrator.py:219-221"},
+    {"from": "db.opportunities", "to": "ext.airtable", "type": "PERSIST"},
+    {"from": "db.opportunities", "to": "ext.supabase", "type": "PERSIST"},
+    {"from": "db.messages", "to": "ext.smtp_esp", "type": "DELIVER", "evidence": "orchestrator.py:147; senders.py"},
+    {"from": "db.opportunities", "to": "canonical.REVENUE", "type": "MAPS_TO"},
+    {"from": "db.deals", "to": "canonical.REVENUE", "type": "MAPS_TO"}
+  ],
+  "structural_findings": {
+    "parallel_paths": ["Airtable and Supabase are interchangeable sinks for the same 8 objects (config.py:41-50)"],
+    "duplicate_sources": ["Airtable/Supabase schema-identical mirrors (write_through.py:27-128)"],
+    "multiple_writers": "NONE_within_repo; cross-system UNRESOLVED",
+    "multiple_readers": "UNRESOLVED (repo reads none from backend)",
+    "circular_dependencies": "NONE (deps point downward only)",
+    "legacy_to_legacy_chains": "NONE observed",
+    "canonical_to_legacy_writes": "NONE observed",
+    "legacy_to_canonical_bridges": "NONE in-repo (interactions is a latent candidate only)"
+  }
+}

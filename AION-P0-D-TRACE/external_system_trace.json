@@ -1,0 +1,13 @@
+{
+  "generated": "2026-08-12",
+  "repository": "Ceoloo/AION-Revenue-Factory",
+  "present": [
+    {"external_system": "Supabase (PostgREST)", "file": "src/aion_revenue_factory/integrations/live/supabase_crm.py", "function": "SupabaseCRM._persist", "lines": "50-69", "direction": "OUT_WRITE", "data": "8 revenue entity row types", "supabase_object": ["opportunities","deals","offers","messages","meetings","proposals","customers","interactions"], "canonical_system": "REVENUE", "confidence": "HIGH"},
+    {"external_system": "Airtable (REST v0)", "file": "src/aion_revenue_factory/integrations/live/airtable_crm.py", "function": "AirtableCRM._persist", "lines": "41-63", "direction": "OUT_WRITE", "data": "same 8 entity row types", "supabase_object": null, "canonical_system": "REVENUE", "confidence": "HIGH"},
+    {"external_system": "Anthropic/Claude", "file": "src/aion_revenue_factory/integrations/live/anthropic_gateway.py", "function": "AnthropicGateway.generate", "lines": "56-72", "direction": "OUT_CALL_IN_RESPONSE", "data": "prompt+context -> marketing copy", "supabase_object": null, "canonical_system": "KNOWLEDGE", "confidence": "HIGH"},
+    {"external_system": "HTTP prospect/enrichment API", "file": "src/aion_revenue_factory/integrations/live/prospect_sources.py", "function": "HttpProspectSource.find", "lines": "101-121", "direction": "IN_READ", "data": "prospect records -> Opportunity", "supabase_object": "opportunities (downstream)", "canonical_system": "REVENUE", "confidence": "HIGH", "note": "response schema deployment-specific via map_record -> UNRESOLVED"},
+    {"external_system": "SMTP mail server", "file": "src/aion_revenue_factory/integrations/live/senders.py", "function": "SmtpSender.__call__", "lines": "54-75", "direction": "OUT_SEND", "data": "EMAIL outreach message", "supabase_object": "messages (mirror)", "canonical_system": "REVENUE", "confidence": "HIGH"},
+    {"external_system": "Generic outbound webhook (ESP/dialer/voice-AI)", "file": "src/aion_revenue_factory/integrations/live/senders.py", "function": "WebhookSender.__call__", "lines": "94-117", "direction": "OUT_SEND", "data": "outreach message JSON", "supabase_object": "messages (mirror)", "canonical_system": "REVENUE", "confidence": "HIGH"}
+  ],
+  "verified_absent": ["Slack","Discord","Stripe","Notion","HubSpot","AWS_EventBridge","AWS_Lambda","AWS_SQS","AWS_SNS","n8n","Make","Vercel","OpenClaw","external_Hermes_runtime","GitHub_API"]
+}

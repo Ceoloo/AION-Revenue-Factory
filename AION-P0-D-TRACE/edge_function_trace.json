@@ -1,0 +1,13 @@
+{
+  "generated": "2026-08-12",
+  "repository": "Ceoloo/AION-Revenue-Factory",
+  "edge_functions_found": 0,
+  "edge_functions": [],
+  "note": "No supabase/functions directory, no Deno.serve entrypoint, no supabase/config.toml. This repository contains zero Supabase Edge Functions (HIGH confidence). Platform-wide edge functions likely live in unscanned repos (aion-company-os / AION-VPS-Empire-Command.V1) -> UNRESOLVED.",
+  "in_process_compute_analogs": [
+    {"symbol": "RevenueFactory.run_day", "file": "src/aion_revenue_factory/orchestrator.py", "lines": "122-234", "trigger": "manual/library call", "writes": ["opportunities","deals","offers","messages","meetings","proposals","customers","interactions"]},
+    {"symbol": "SupabaseCRM._persist", "file": "src/aion_revenue_factory/integrations/live/supabase_crm.py", "lines": "50-69", "trigger": "called by write-through methods", "effect": "POST {SUPABASE_URL}/rest/v1/{table} (INSERT)", "service_role_usage": "possible-config-dependent"},
+    {"symbol": "AnthropicGateway.generate", "file": "src/aion_revenue_factory/integrations/live/anthropic_gateway.py", "lines": "56-72", "trigger": "offer/outreach/proposal copy", "effect": "Anthropic messages.create"},
+    {"symbol": "HttpProspectSource.find", "file": "src/aion_revenue_factory/integrations/live/prospect_sources.py", "lines": "101-121", "trigger": "OpportunityDiscovery.discover", "effect": "GET/POST prospect API -> Opportunity"}
+  ]
+}

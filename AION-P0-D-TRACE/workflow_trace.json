@@ -1,0 +1,27 @@
+{
+  "generated": "2026-08-12",
+  "repository": "Ceoloo/AION-Revenue-Factory",
+  "external_schedulers": {"github_actions": false, "supabase_scheduled_functions": false, "pg_cron": false, "eventbridge": false, "lambda": false, "sqs": false, "sns": false, "n8n": false, "make": false, "queue_consumers": false, "inbound_webhooks": false, "openclaw": false},
+  "workflows": [
+    {
+      "workflow": "Daily revenue cycle",
+      "trigger": "Manual (cli.py main / examples / external caller). Repo ships NO scheduler.",
+      "trigger_evidence": "src/aion_revenue_factory/cli.py:88-95; orchestrator.py:236-237",
+      "first_component": "OpportunityDiscovery.discover",
+      "steps": [
+        {"step": 1, "name": "discover prospects", "evidence": "orchestrator.py:129", "external": "HTTP prospect API (live)", "writes": ["opportunities"]},
+        {"step": 2, "name": "rank + qualify", "evidence": "orchestrator.py:132"},
+        {"step": 3, "name": "create offer", "evidence": "orchestrator.py:135", "external": "Claude (live)", "writes": ["offers"]},
+        {"step": 4, "name": "compose + send outreach", "evidence": "orchestrator.py:138-148", "external": "SMTP/ESP (live)", "writes": ["messages"]},
+        {"step": 5, "name": "reply signal (ResponseModel; replace in prod)", "evidence": "orchestrator.py:159", "writes": ["deals"]},
+        {"step": 6, "name": "book meeting + prep", "evidence": "orchestrator.py:177-178", "writes": ["meetings"]},
+        {"step": 7, "name": "proposal + coach", "evidence": "orchestrator.py:182-187", "writes": ["proposals"]},
+        {"step": 8, "name": "close + onboard", "evidence": "orchestrator.py:193-200", "writes": ["customers","deals"]},
+        {"step": 9, "name": "record + learn (in-memory only)", "evidence": "orchestrator.py:219-221", "writes": ["interactions"], "note": "KnowledgeBase weights NOT persisted"}
+      ],
+      "database_objects": ["opportunities","offers","messages","deals","meetings","proposals","customers","interactions"],
+      "external_systems": ["HTTP prospect API","Claude","Airtable/Supabase","SMTP/ESP"],
+      "final_output": "DayResult + Dashboard.metrics(); persisted rows (live CRM only)"
+    }
+  ]
+}

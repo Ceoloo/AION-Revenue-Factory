@@ -1,0 +1,19 @@
+{
+  "generated": "2026-08-12",
+  "repository": "Ceoloo/AION-Revenue-Factory",
+  "legacy_event_family_referenced": false,
+  "legacy_memory_family_referenced": false,
+  "legacy_registry_family_referenced": false,
+  "searched_and_absent": ["events","aion_events","aion_events_v2","operational_events","memory_events","event_memory.events","revenue_sync_events","aion_memories","learning_lessons","aion_lessons","leep","leep_events","leep_extracted_lessons","founder_memory","learning_feedback","aion_system_registry","aion_system_registry_sources","aion_producer_consumer_trace","aion_repository_edge_trace"],
+  "revenue_family_present": [
+    {"source": "opportunities", "written_by": ["RevenueFactory via SupabaseCRM/AirtableCRM"], "read_by_in_repo": [], "canonical_target": "REVENUE", "active": "only-when-live-env-set", "source_of_truth": "UNRESOLVED", "projection_or_cache": "durable projection of factory output", "duplicate_risk": "Airtable+Supabase schema-identical", "safe_to_redirect": "UNRESOLVED", "safe_to_read_only": "NO_breaks_writer", "migration_transform": "flat field mapper (write_through.py:27-45)", "migration_class": "UNRESOLVED", "evidence": "write_through.py:157-159"},
+    {"source": "deals", "written_by": ["RevenueFactory"], "read_by_in_repo": [], "canonical_target": "REVENUE", "migration_class": "UNRESOLVED", "evidence": "write_through.py:161-163"},
+    {"source": "offers", "written_by": ["RevenueFactory"], "read_by_in_repo": [], "canonical_target": "REVENUE", "migration_class": "UNRESOLVED", "evidence": "write_through.py:165-167"},
+    {"source": "proposals", "written_by": ["RevenueFactory"], "read_by_in_repo": [], "canonical_target": "REVENUE", "migration_class": "UNRESOLVED", "evidence": "write_through.py:177-179"},
+    {"source": "customers", "written_by": ["RevenueFactory"], "read_by_in_repo": [], "canonical_target": "REVENUE", "migration_class": "UNRESOLVED", "evidence": "write_through.py:181-183"},
+    {"source": "meetings", "written_by": ["RevenueFactory"], "read_by_in_repo": [], "canonical_target": "REVENUE", "migration_class": "UNRESOLVED", "evidence": "write_through.py:173-175"},
+    {"source": "messages", "written_by": ["RevenueFactory"], "read_by_in_repo": [], "canonical_target": "REVENUE", "migration_class": "UNRESOLVED", "evidence": "write_through.py:169-171"},
+    {"source": "interactions", "written_by": ["RevenueFactory"], "read_by_in_repo": [], "canonical_target": "REVENUE_or_EVENTS", "note": "event-shaped rows in a CRM table; EVENTS routing is a design target not observed behavior", "migration_class": "UNRESOLVED", "evidence": "write_through.py:117-128,185-187"}
+  ],
+  "memory_analog": {"source": "KnowledgeBase (in-memory weights)", "persisted": false, "canonical_target": "KNOWLEDGE/MEMORY", "migration_class": "UNRESOLVED", "evidence": "integrations/knowledge.py:24-71; not written to any DB"}
+}

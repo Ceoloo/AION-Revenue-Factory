@@ -1,0 +1,52 @@
+{
+  "generated": "2026-08-12",
+  "mode": "read-only-forensic",
+  "session_repo_scope": ["Ceoloo/AION-Revenue-Factory"],
+  "repositories": [
+    {
+      "repository": "Ceoloo/AION-Revenue-Factory",
+      "path": "/home/user/AION-Revenue-Factory",
+      "remote": "https://github.com/Ceoloo/AION-Revenue-Factory",
+      "branch": "claude/aion-p0d-forensics-byek01",
+      "commit": "c4a12aded14b17792e889c043ebc4d839bff30e4",
+      "framework": "Python package (setuptools); dependency-free core + optional anthropic SDK",
+      "runtime": "CPython >=3.10, CLI/library, no server, no serverless",
+      "package_manager": "pip / PEP517",
+      "entrypoints": ["src/aion_revenue_factory/__main__.py", "src/aion_revenue_factory/cli.py:main", "script:aion-revenue-factory"],
+      "edge_functions": [],
+      "api_routes": [],
+      "workers": [],
+      "cron_jobs": [],
+      "webhooks": {"inbound": [], "outbound": ["WebhookSender -> ESP/dialer/voice URL"]},
+      "database_code": "REST only (Supabase PostgREST POST, Airtable REST POST); no SQL/RPC/migrations/triggers",
+      "external_integrations": ["Anthropic/Claude", "Airtable", "Supabase (PostgREST)", "HTTP prospect API", "SMTP", "generic webhook"],
+      "agent_systems": ["in-process rule-based departments", "in-memory KnowledgeBase (not persisted)"],
+      "deployment_targets": ["pip package (no container/serverless/IaC config)"],
+      "env_var_names": ["ANTHROPIC_API_KEY","AION_LLM_MODEL","AIRTABLE_API_KEY","AIRTABLE_BASE_ID","SUPABASE_URL","SUPABASE_KEY","AION_PROSPECT_URL","AION_PROSPECT_API_KEY","AION_PROSPECT_METHOD","SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","AION_OUTREACH_WEBHOOK_URL","AION_OUTREACH_WEBHOOK_KEY"],
+      "docs": ["README.md", "docs/ARCHITECTURE.md"],
+      "scan_status": "FULLY_SCANNED",
+      "confidence": "HIGH"
+    },
+    {
+      "repository": "Ceoloo/AION-Advisor-Growth-Engine",
+      "url": "https://github.com/Ceoloo/AION-Advisor-Growth-Engine",
+      "visibility": "public",
+      "scan_status": "NOT_SCANNED_OUT_OF_SESSION_SCOPE",
+      "confidence": "UNKNOWN"
+    },
+    {
+      "repository": "Ceoloo/AION-VPS-Empire-Command.V1",
+      "url": "https://github.com/Ceoloo/AION-VPS-Empire-Command.V1",
+      "visibility": "private",
+      "scan_status": "NOT_SCANNED_OUT_OF_SESSION_SCOPE",
+      "confidence": "UNKNOWN"
+    },
+    {
+      "repository": "Ceoloo/aion-company-os",
+      "url": "https://github.com/Ceoloo/aion-company-os",
+      "visibility": "private",
+      "scan_status": "NOT_SCANNED_OUT_OF_SESSION_SCOPE",
+      "confidence": "UNKNOWN"
+    }
+  ]
+}
