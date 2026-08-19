@@ -16,6 +16,12 @@ Quick start::
 
 from .config import build_factory_from_env, describe_wiring
 from .dashboard import Dashboard
+from .integrations import (
+    CollectingSink,
+    EventSink,
+    HttpTelemetrySink,
+    NullSink,
+)
 from .orchestrator import DayResult, ResponseModel, RevenueFactory
 
 __version__ = "0.1.0"
@@ -27,5 +33,9 @@ __all__ = [
     "Dashboard",
     "build_factory_from_env",
     "describe_wiring",
+    "EventSink",
+    "NullSink",
+    "CollectingSink",
+    "HttpTelemetrySink",
     "__version__",
 ]

@@ -20,6 +20,9 @@ Outreach email:
     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
 Outreach webhook:
     AION_OUTREACH_WEBHOOK_URL [+ AION_OUTREACH_WEBHOOK_KEY]
+Telemetry (AION events):
+    AION_TELEMETRY_URL       -> POST envelope events to this endpoint
+    AION_TELEMETRY_KEY       -> its bearer token (optional)
 """
 
 from __future__ import annotations
@@ -88,6 +91,17 @@ def _build_sender(env: dict, crm):
     return None  # -> offline no-op
 
 
+def _build_event_sink(env: dict):
+    if env.get("AION_TELEMETRY_URL"):
+        from .integrations.event_sink import HttpTelemetrySink
+
+        return HttpTelemetrySink(
+            env["AION_TELEMETRY_URL"],
+            api_key=env.get("AION_TELEMETRY_KEY"),
+        )
+    return None  # -> NullSink (offline)
+
+
 def build_factory_from_env(env: dict | None = None, **kwargs) -> RevenueFactory:
     """Construct a RevenueFactory, injecting live adapters where configured."""
     env = os.environ if env is None else env
@@ -97,6 +111,7 @@ def build_factory_from_env(env: dict | None = None, **kwargs) -> RevenueFactory:
         crm=crm,
         gateway=_build_gateway(env),
         source=_build_source(env),
+        event_sink=_build_event_sink(env),
         **kwargs,
     )
     # The email sender needs to read contacts back out of the CRM the factory
@@ -127,4 +142,5 @@ def describe_wiring(env: dict | None = None) -> dict:
         "crm": crm,
         "prospects": "http_api" if env.get("AION_PROSPECT_URL") else "synthetic (offline)",
         "outreach": outreach,
+        "telemetry": "http" if env.get("AION_TELEMETRY_URL") else "off (offline)",
     }
