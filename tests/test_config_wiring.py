@@ -14,6 +14,7 @@ def test_describe_wiring_all_offline():
         "crm": "in_memory (offline)",
         "prospects": "synthetic (offline)",
         "outreach": "no-op (offline)",
+        "telemetry": "off (offline)",
     }
 
 
