@@ -35,13 +35,19 @@ APPOINTMENT_EVENTS = (
     "appointment.booked", "appointment.qualified",
     "appointment.cancelled", "appointment.no_show",
 )
+# Revenue lifecycle events (Phase 4). deal.*/proposal.*/revenue.* are the
+# revenue-domain lifecycle; billing.* remain the platform finance events.
+DEAL_EVENTS = ("deal.won", "deal.lost")
+PROPOSAL_EVENTS = ("proposal.sent",)
+REVENUE_EVENTS = ("revenue.collected",)
 BILLING_EVENTS = (
     "billing.invoice_created", "billing.payment_succeeded", "billing.payment_failed",
 )
 SERVICE_EVENTS = ("service.health_reported", "production_readiness.scored")
 KNOWN_EVENTS = frozenset(
     WORKFLOW_EVENTS + LEAD_EVENTS + CAMPAIGN_EVENTS + OUTREACH_EVENTS
-    + APPOINTMENT_EVENTS + BILLING_EVENTS + SERVICE_EVENTS
+    + APPOINTMENT_EVENTS + DEAL_EVENTS + PROPOSAL_EVENTS + REVENUE_EVENTS
+    + BILLING_EVENTS + SERVICE_EVENTS
 )
 
 SENSITIVE_KEYS = frozenset(

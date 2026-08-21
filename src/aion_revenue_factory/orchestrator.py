@@ -108,7 +108,8 @@ class RevenueFactory:
 
         - ``gateway``: an AIGateway (default TemplateGateway; inject
           AnthropicGateway for real LLM copy).
-        - ``crm``: a CRM (default InMemoryCRM; inject AirtableCRM / SupabaseCRM).
+        - ``crm``: a CRM (default InMemoryCRM; inject AirtableCRM / SupabaseCRM /
+          SupabaseRevenueAdapter).
         - ``source``: a ProspectSource (default SyntheticSource; inject
           HttpProspectSource for real enrichment APIs).
         - ``outreach_send``: a callable that actually sends a message (default
@@ -254,6 +255,10 @@ class RevenueFactory:
             deal.advance(Stage.PROPOSAL_SENT)
             deal.proposal_id = proposal.id
             proposals += 1
+            self._emit("proposal.sent", cid, workflow_id=workflow_id,
+                       payload={"opportunity_id": opp.id, "proposal_id": proposal.id,
+                                "offer_id": offer.id},
+                       metrics={"amount": proposal.amount})
 
             probability = self.coach.close_probability(opp, offer)
             if self.responses.closes(probability):
@@ -270,6 +275,13 @@ class RevenueFactory:
                 self._emit("billing.payment_succeeded", cid, workflow_id=workflow_id,
                            payload={"opportunity_id": opp.id, "proposal_id": proposal.id},
                            metrics={"amount": proposal.amount})
+                self._emit("deal.won", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "deal_id": deal.id,
+                                    "proposal_id": proposal.id},
+                           metrics={"amount": proposal.amount})
+                self._emit("revenue.collected", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "deal_id": deal.id},
+                           metrics={"amount": proposal.amount})
                 interactions.append(
                     Interaction(
                         step="close", outcome="positive", agent=self.coach.agent,
@@ -279,6 +291,9 @@ class RevenueFactory:
             else:
                 proposal.won = False
                 deal.advance(Stage.LOST)
+                self._emit("deal.lost", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "deal_id": deal.id,
+                                    "proposal_id": proposal.id})
                 interactions.append(
                     Interaction(
                         step="close", outcome="negative", agent=self.coach.agent,
