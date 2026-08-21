@@ -97,7 +97,7 @@ def _call_row(mt: Any) -> dict:
         "discovery_call_id": mt.id,
         "lead_id": mt.opportunity_id,
         "call_status": "booked",
-        "call_date": mt.scheduled_for.date().isoformat(),
+        "call_date": mt.scheduled_for.isoformat(),
         "raw_metadata": {"scheduled_for": mt.scheduled_for.isoformat()},
     }
 
