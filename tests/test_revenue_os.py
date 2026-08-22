@@ -2,6 +2,8 @@
 
 Proves the new Revenue OS layer produces outcomes equivalent to the existing,
 tested Revenue Factory -- so production traffic can be switched only after parity.
+Phase 5 strengthens the projection-shape checks to validate every projected row
+against the live-DDL NOT NULL contract (``validate_canonical_row``).
 """
 
 import agents.revenue as revenue_agents
@@ -10,7 +12,7 @@ import apps.revenue as revenue_app
 from aion_revenue_factory import Dashboard, RevenueFactory
 from aion_revenue_factory.integrations import CollectingSink
 from aion_revenue_factory.integrations.aion_events import validate_event
-from integrations.revenue import SupabaseRevenueAdapter
+from integrations.revenue import SupabaseRevenueAdapter, validate_canonical_row
 
 
 # -- structure / facades (no fork, no duplication) ------------------------
@@ -48,16 +50,24 @@ def test_adapter_projects_canonical_revenue_rows():
     adapter = SupabaseRevenueAdapter()
     RevenueFactory(crm=adapter).run_days(5, prospects=50)
 
+    # Every projected row must satisfy the live-DDL contract (canonical table +
+    # NOT NULL columns) -- the guard the Phase 4 reference sink lacked.
+    for table, row in adapter.persisted:
+        validate_canonical_row(table, row)
+
     leads = adapter.rows_for("revenue_leads")
     assert leads
     for r in leads:
         assert r["source_system"] == "aion_revenue_factory"
+        assert r["universal_record_id"].startswith("rf::")
         assert "lead_id" in r and "company" in r and "lead_score" in r
 
     deals = adapter.rows_for("revenue_deals")
     assert deals
     for r in deals:
         assert "deal_id" in r and "deal_value" in r and "deal_stage" in r
+        assert r["deal_name"]  # NOT NULL on the live table
+        assert "source_record_id" not in r  # column does not exist on revenue_deals
 
     # Won deals produce both an outcome and a revenue event.
     outcomes = adapter.rows_for("revenue_outcomes")
