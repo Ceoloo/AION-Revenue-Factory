@@ -27,4 +27,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+# ``src`` holds the packaged domain code; ``.`` exposes the Revenue OS
+# organizing layer (apps/revenue, agents/revenue, integrations/revenue) which
+# are facades over the packaged code (not installed as wheels).
+pythonpath = ["src", "."]

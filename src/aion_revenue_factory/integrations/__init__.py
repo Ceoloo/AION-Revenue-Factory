@@ -7,7 +7,15 @@ or the orchestrator.
 """
 
 from .ai_gateway import AIGateway, TemplateGateway
+from .aion_events import (
+    Event,
+    has_unmasked_sensitive,
+    new_event,
+    redact_payload,
+    validate_event,
+)
 from .crm import CRM, InMemoryCRM
+from .event_sink import CollectingSink, EventSink, HttpTelemetrySink, NullSink
 from .knowledge import KnowledgeBase
 
 __all__ = [
@@ -16,4 +24,13 @@ __all__ = [
     "CRM",
     "InMemoryCRM",
     "KnowledgeBase",
+    "Event",
+    "new_event",
+    "validate_event",
+    "redact_payload",
+    "has_unmasked_sensitive",
+    "EventSink",
+    "NullSink",
+    "CollectingSink",
+    "HttpTelemetrySink",
 ]

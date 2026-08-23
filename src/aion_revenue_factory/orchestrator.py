@@ -9,11 +9,17 @@ the vision:
 Prospect responses are produced by an injectable, seeded ``ResponseModel`` so a
 run is fully deterministic and offline. Swap it for a live model that reads real
 replies and the same orchestration drives production.
+
+Every meaningful step also emits a versioned AION envelope event through an
+injectable ``EventSink`` (default ``NullSink`` = no-op), threaded by one
+``correlation_id`` per opportunity so a customer journey can be reconstructed
+end-to-end. Emission never touches the seeded RNGs, so runs stay deterministic.
 """
 
 from __future__ import annotations
 
 import random
+import uuid
 from dataclasses import dataclass, field
 
 from .departments import (
@@ -27,8 +33,18 @@ from .departments import (
     ProposalGenerator,
     SyntheticSource,
 )
-from .domain import Deal, Interaction, Stage
+from .domain import Channel, Deal, Interaction, Stage
 from .integrations import InMemoryCRM, KnowledgeBase, TemplateGateway
+from .integrations.aion_events import new_event, redact_payload
+from .integrations.event_sink import NullSink
+
+# Channels with a canonical AION outreach event type. Other channels (SMS, cold
+# call, voice AI) have no canonical outreach.* type yet, so no channel-specific
+# event is emitted for them (the workflow/deal still captures the activity).
+_OUTREACH_EVENT_BY_CHANNEL = {
+    Channel.EMAIL: "outreach.email_sent",
+    Channel.LINKEDIN: "outreach.linkedin_sent",
+}
 
 
 @dataclass
@@ -82,6 +98,8 @@ class RevenueFactory:
         gateway=None,
         source=None,
         outreach_send=None,
+        event_sink=None,
+        environment: str = "development",
     ) -> None:
         """Wire the departments together.
 
@@ -90,11 +108,14 @@ class RevenueFactory:
 
         - ``gateway``: an AIGateway (default TemplateGateway; inject
           AnthropicGateway for real LLM copy).
-        - ``crm``: a CRM (default InMemoryCRM; inject AirtableCRM / SupabaseCRM).
+        - ``crm``: a CRM (default InMemoryCRM; inject AirtableCRM / SupabaseCRM /
+          SupabaseRevenueAdapter).
         - ``source``: a ProspectSource (default SyntheticSource; inject
           HttpProspectSource for real enrichment APIs).
         - ``outreach_send``: a callable that actually sends a message (default
           offline no-op; inject SmtpSender / WebhookSender).
+        - ``event_sink``: an EventSink (default NullSink = no-op; inject
+          HttpTelemetrySink to publish AION envelope events).
         """
         self.crm = crm or InMemoryCRM()
         self.knowledge = knowledge or KnowledgeBase()
@@ -117,11 +138,34 @@ class RevenueFactory:
         self.learning = LearningEngine(self.knowledge)
 
         self.responses = ResponseModel(seed=response_seed)
+        # Event emission. NullSink keeps offline runs side-effect free; inject
+        # any EventSink (e.g. HttpTelemetrySink) to publish envelope events.
+        self.events = event_sink or NullSink()
+        self.environment = environment
         self._day = 0
+
+    def _emit(self, event_type, correlation_id, *, payload=None, metrics=None,
+              workflow_id=None) -> None:
+        """Build and publish one AION envelope event (payload is redacted)."""
+        event = new_event(
+            event_type,
+            payload=redact_payload(payload or {}),
+            metrics=metrics or {},
+            correlation_id=correlation_id,
+            environment=self.environment,
+        )
+        if workflow_id:
+            event.workflow_id = workflow_id
+        self.events.emit(event)
 
     def run_day(self, prospects: int = 50) -> DayResult:
         """Execute one full autonomous revenue cycle."""
         self._day += 1
+        workflow_id = str(uuid.uuid4())
+        self._emit("workflow.started", workflow_id, workflow_id=workflow_id,
+                   payload={"prospects": prospects})
+        correlation: dict[str, str] = {}
+
         interactions: list[Interaction] = []
         contacted = replied = meetings = proposals = won = 0
         revenue = 0.0
@@ -129,9 +173,25 @@ class RevenueFactory:
         opportunities = self.discovery.discover(prospects)
         for opp in opportunities:
             self.crm.upsert_opportunity(opp)
+            correlation[opp.id] = str(uuid.uuid4())
+            self._emit(
+                "lead.discovered", correlation[opp.id], workflow_id=workflow_id,
+                payload={"opportunity_id": opp.id, "company": opp.name,
+                         "industry": opp.industry, "source": opp.source},
+                metrics={"composite": opp.scores.composite,
+                         "estimated_contract_value": opp.scores.estimated_contract_value},
+            )
         qualified = self.discovery.qualified(self.discovery.rank(opportunities))
 
         for opp in qualified:
+            cid = correlation[opp.id]
+            self._emit(
+                "lead.qualified", cid, workflow_id=workflow_id,
+                payload={"opportunity_id": opp.id, "industry": opp.industry},
+                metrics={"composite": opp.scores.composite,
+                         "buying_intent": opp.scores.buying_intent,
+                         "urgency": opp.scores.urgency_score},
+            )
             offer = self.offers.create_offer(opp)
             self.crm.save_offer(offer)
 
@@ -148,6 +208,10 @@ class RevenueFactory:
             self.crm.save_message(msg)
             deal.advance(Stage.CONTACTED)
             contacted += 1
+            outreach_event = _OUTREACH_EVENT_BY_CHANNEL.get(channel)
+            if outreach_event:
+                self._emit(outreach_event, cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "channel": channel.value})
 
             base_interaction = dict(
                 opportunity_id=opp.id,
@@ -178,6 +242,9 @@ class RevenueFactory:
             self.crm.save_meeting(meeting)
             deal.advance(Stage.MEETING_BOOKED)
             meetings += 1
+            self._emit("appointment.booked", cid, workflow_id=workflow_id,
+                       payload={"opportunity_id": opp.id,
+                                "scheduled_for": meeting.scheduled_for.isoformat()})
 
             proposal = self.proposals.generate(opp, offer)
             recs = self.coach.recommend(opp, offer, proposal)
@@ -188,6 +255,10 @@ class RevenueFactory:
             deal.advance(Stage.PROPOSAL_SENT)
             deal.proposal_id = proposal.id
             proposals += 1
+            self._emit("proposal.sent", cid, workflow_id=workflow_id,
+                       payload={"opportunity_id": opp.id, "proposal_id": proposal.id,
+                                "offer_id": offer.id},
+                       metrics={"amount": proposal.amount})
 
             probability = self.coach.close_probability(opp, offer)
             if self.responses.closes(probability):
@@ -198,6 +269,19 @@ class RevenueFactory:
                 revenue += proposal.amount
                 customer = self.success.onboard(opp, deal)
                 self.crm.save_customer(customer)
+                self._emit("billing.invoice_created", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "proposal_id": proposal.id},
+                           metrics={"amount": proposal.amount})
+                self._emit("billing.payment_succeeded", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "proposal_id": proposal.id},
+                           metrics={"amount": proposal.amount})
+                self._emit("deal.won", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "deal_id": deal.id,
+                                    "proposal_id": proposal.id},
+                           metrics={"amount": proposal.amount})
+                self._emit("revenue.collected", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "deal_id": deal.id},
+                           metrics={"amount": proposal.amount})
                 interactions.append(
                     Interaction(
                         step="close", outcome="positive", agent=self.coach.agent,
@@ -207,6 +291,9 @@ class RevenueFactory:
             else:
                 proposal.won = False
                 deal.advance(Stage.LOST)
+                self._emit("deal.lost", cid, workflow_id=workflow_id,
+                           payload={"opportunity_id": opp.id, "deal_id": deal.id,
+                                    "proposal_id": proposal.id})
                 interactions.append(
                     Interaction(
                         step="close", outcome="negative", agent=self.coach.agent,
@@ -220,7 +307,7 @@ class RevenueFactory:
             self.crm.record_interaction(interaction)
         self.learning.learn_batch(interactions)
 
-        return DayResult(
+        result = DayResult(
             day=self._day,
             discovered=len(opportunities),
             qualified=len(qualified),
@@ -232,6 +319,13 @@ class RevenueFactory:
             revenue=round(revenue, 2),
             interactions=interactions,
         )
+        self._emit(
+            "workflow.completed", workflow_id, workflow_id=workflow_id,
+            metrics={"discovered": result.discovered, "qualified": result.qualified,
+                     "contacted": contacted, "replied": replied, "meetings": meetings,
+                     "proposals": proposals, "won": won, "revenue": result.revenue},
+        )
+        return result
 
     def run_days(self, days: int, prospects: int = 50) -> list[DayResult]:
         return [self.run_day(prospects) for _ in range(days)]
